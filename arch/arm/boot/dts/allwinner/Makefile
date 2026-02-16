@@ -203,6 +203,8 @@ DTC_FLAGS_sun8i-h3-orangepi-pc-plus := -@
 DTC_FLAGS_sun8i-t113s-netcube-nagami-basic-carrier := -@
 DTC_FLAGS_sun8i-v3s-netcube-kumquat := -@
 dtb-$(CONFIG_MACH_SUN8I) += \
+	elegoo-centauri-carbon1.dtb \
+	elegoo-centauri-carbon2.dtb \
 	sun8i-a23-evb.dtb \
 	sun8i-a23-gt90h-v4.dtb \
 	sun8i-a23-inet86dz.dtb \
