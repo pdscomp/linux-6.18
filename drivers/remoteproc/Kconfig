@@ -378,6 +378,22 @@ config XLNX_R5_REMOTEPROC
 
 	  It's safe to say N if not interested in using RPU r5f cores.
 
+config SUNXI_R528_HIFI4_REMOTEPROC
+	tristate "Allwinner R528/D1/T113 HiFi4 DSP remoteproc"
+	depends on ARCH_SUNXI || COMPILE_TEST
+	depends on REMOTEPROC
+	select MAILBOX
+	select SUNXI_R528_MSGBOX
+	help
+	  Say Y or M here to support the HiFi4 DSP found in Allwinner
+	  R528, D1, and T113 SoCs. This driver manages loading firmware,
+	  starting/stopping the DSP, and communicating via RPMsg.
+
+	  This is needed if you want to offload audio processing or other
+	  tasks to the DSP core.
+
+	  If unsure, say N.
+
 endif # REMOTEPROC
 
 endmenu

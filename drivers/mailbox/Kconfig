@@ -323,6 +323,16 @@ config SUN6I_MSGBOX
 	  various Allwinner SoCs. This mailbox is used for communication
 	  between the application CPUs and the power management coprocessor.
 
+config SUNXI_R528_MSGBOX
+	tristate "Allwinner R528/D1/T113 Message Box"
+	depends on ARCH_SUNXI || COMPILE_TEST
+	depends on HAS_IOMEM
+	help
+	  Mailbox driver for the message box hardware found in Allwinner
+	  R528, D1, and T113 SoCs. This provides communication channels
+	  between the ARM CPU and the HiFi4 DSP core.
+	  Say Y here if you want to use the DSP on these SoCs.
+
 config SPRD_MBOX
 	tristate "Spreadtrum Mailbox"
 	depends on ARCH_SPRD || COMPILE_TEST
