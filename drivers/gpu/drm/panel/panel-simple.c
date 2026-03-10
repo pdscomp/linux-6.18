@@ -470,6 +470,28 @@ static struct panel_desc *panel_dpi_probe(struct device *dev)
 	of_property_read_u32(np, "width-mm", &desc->size.width);
 	of_property_read_u32(np, "height-mm", &desc->size.height);
 
+	/* Allow DT to declare the media bus format (e.g. BGR888 for RB swap) */
+	of_property_read_u32(np, "bus-format", &desc->bus_format);
+
+	/*
+	 * Derive bpc from bus_format when not otherwise specified. panel-simple
+	 * validates bpc to be 6 or 8, and downstream code (e.g. the sun4i-drm
+	 * dithering path and mixer output format selection) reads bpc from
+	 * drm_display_info. Leaving it at 0 triggers warnings and can result
+	 * in an incorrect TCON data-path configuration.
+	 */
+	if (!desc->bpc) {
+		switch (desc->bus_format) {
+		case MEDIA_BUS_FMT_RGB666_1X18:
+		case MEDIA_BUS_FMT_RGB666_1X7X3_SPWG:
+			desc->bpc = 6;
+			break;
+		default:
+			desc->bpc = 8;
+			break;
+		}
+	}
+
 	/* Extract bus_flags from display_timing */
 	bus_flags = 0;
 	vm.flags = timing->flags;

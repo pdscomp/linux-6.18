@@ -586,6 +586,20 @@ static void sun4i_tcon0_mode_set_rgb(struct sun4i_tcon *tcon,
 			   SUN4I_TCON0_IO_POL_DE_NEGATIVE,
 			   val);
 
+	/*
+	 * If the panel reports BGR bus format, enable the TCON0 hardware
+	 * RB swap (bit 23 of TCON0_CTL) to compensate for the swapped
+	 * Red and Blue data lines on the panel's physical connector.
+	 */
+	if (info->num_bus_formats == 1 &&
+	    info->bus_formats[0] == MEDIA_BUS_FMT_BGR888_1X24)
+		regmap_update_bits(tcon->regs, SUN4I_TCON0_CTL_REG,
+				   SUN4I_TCON0_CTL_RB_SWAP,
+				   SUN4I_TCON0_CTL_RB_SWAP);
+	else
+		regmap_update_bits(tcon->regs, SUN4I_TCON0_CTL_REG,
+				   SUN4I_TCON0_CTL_RB_SWAP, 0);
+
 	/* Map output pins to channel 0 */
 	regmap_update_bits(tcon->regs, SUN4I_TCON_GCTL_REG,
 			   SUN4I_TCON_GCTL_IOMAP_MASK,
