@@ -250,13 +250,33 @@ static void sun8i_tcon_top_unbind(struct device *dev, struct device *master,
 	reset_control_assert(tcon_top->rst);
 }
 
+static int sun8i_tcon_top_dummy_bind(struct device *dev, struct device *master,
+				     void *data)
+{
+	return 0;
+}
+
 static const struct component_ops sun8i_tcon_top_ops = {
-	.bind	= sun8i_tcon_top_bind,
+	.bind	= sun8i_tcon_top_dummy_bind,
 	.unbind	= sun8i_tcon_top_unbind,
 };
 
 static int sun8i_tcon_top_probe(struct platform_device *pdev)
 {
+	int ret;
+
+	/*
+	 * Register the TCON TOP reset, bus clock and clock gates (including
+	 * the DSI "mod" clock) at probe rather than at DRM component bind.
+	 * The MIPI-DSI controller fetches that clock during its own probe,
+	 * which runs before the sun4i-drm component master binds the
+	 * pipeline; registering it at bind deadlocks DSI probe.  Reuse the
+	 * existing bind body directly here.
+	 */
+	ret = sun8i_tcon_top_bind(&pdev->dev, NULL, NULL);
+	if (ret)
+		return ret;
+
 	return component_add(&pdev->dev, &sun8i_tcon_top_ops);
 }
 
