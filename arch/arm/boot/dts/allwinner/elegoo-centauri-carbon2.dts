@@ -1,0 +1,400 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+// Copyright (C) 2026 James Turton.
+
+/dts-v1/;
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+#include "sun8i-t113s.dtsi"
+
+/ {
+	model = "Elegoo Centauri Carbon 2";
+	compatible = "elegoo,centauri-carbon2", "allwinner,sun8i-t113s";
+
+	aliases {
+		serial0 = &uart0;
+		serial1 = &uart1;
+		serial2 = &uart2;
+		serial3 = &uart3;
+		serial4 = &uart4;
+		i2c2 = &i2c2;
+		mmc0 = &mmc2; /* eMMC -> /dev/mmcblk0 */
+		mmc1 = &mmc1; /* SDIO WiFi */
+	};
+
+	chosen {
+		stdout-path = "serial2:115200n8";
+	};
+
+	/* board wide 5V supply directly from the USB-C socket */
+	reg_vcc5v: regulator-5v {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc-5v";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		regulator-always-on;
+	};
+
+	/* SY8008 DC/DC regulator on the board */
+	reg_3v3: regulator-3v3 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc-3v3";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		vin-supply = <&reg_vcc5v>;
+	};
+
+	reg_1v8: regulator-1v8 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc-1v8";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-always-on;
+		vin-supply = <&reg_3v3>;
+	};
+
+	/* SY8008 DC/DC regulator on the board, also supplying VDD-SYS */
+	reg_vcc_core: regulator-core {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc-core";
+		regulator-min-microvolt = <880000>;
+		regulator-max-microvolt = <880000>;
+		vin-supply = <&reg_vcc5v>;
+	};
+
+	wifi_pwrseq: wifi-pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		reset-gpios = <&pio 6 7 GPIO_ACTIVE_LOW>; /* PG7 - WL_REG_ON */
+		clocks = <&ccu CLK_FANOUT2>;
+		clock-names = "ext_clock";
+		assigned-clocks = <&ccu CLK_FANOUT2>;
+		assigned-clock-parents = <&ccu CLK_FANOUT_32K>;
+		pinctrl-0 = <&clk_pg12_pin>;
+		pinctrl-names = "default";
+	};
+
+	rfkill-bt {
+		compatible = "rfkill-gpio";
+		label = "bt";
+		radio-type = "bluetooth";
+		shutdown-gpios = <&pio 6 18 GPIO_ACTIVE_HIGH>; /* PG18 - BT_RST_N */
+	};
+
+	backlight: backlight {
+		compatible = "pwm-backlight";
+		pwms = <&pwm 7 20000 0>;
+		brightness-levels = <0 16 32 64 128 255>;
+		num-interpolated-steps = <20>;
+		default-brightness-level = <100>;
+		power-supply = <&reg_vcc5v>;
+	};
+
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		/*
+		 * Reserve memory for the DSP firmware.
+		 * Adjust base and size to match your firmware's linker script.
+		 * This region must not overlap with Linux kernel memory.
+		 *
+		 * Common configurations:
+		 *   - SRAM only (small firmware): use the DSP SRAM region
+		 *   - DDR carveout (large firmware): reserve a DDR region
+		 */
+		dsp_reserved: dsp@42000000 {
+			reg = <0x42000000 0x00100000>; /* 1 MiB example */
+			no-map;
+		};
+
+		/*
+		 * Shared memory for RPMsg virtio vrings and buffers.
+		 * This must be accessible by both ARM and DSP.
+		 */
+		vdev0buffer: vdev0buffer@42100000 {
+			compatible = "shared-dma-pool";
+			reg = <0x42100000 0x40000>; /* 256 KiB */
+			no-map;
+		};
+
+		vdev0vring0: vdev0vring0@42140000 {
+			reg = <0x42140000 0x2000>; /* 8 KiB */
+			no-map;
+		};
+
+		vdev0vring1: vdev0vring1@42142000 {
+			reg = <0x42142000 0x2000>; /* 8 KiB */
+			no-map;
+		};
+	};
+
+	soc {
+		msgbox: mailbox@3003000 {
+			compatible = "allwinner,sunxi-r528-msgbox";
+			reg = <0x03003000 0x1000>,  /* ARM CPUX_MSGBOX (local/RX) */
+			      <0x01701000 0x1000>;  /* DSP_MSGBOX (remote/TX) */
+			reg-names = "local", "remote";
+			clocks = <&ccu CLK_BUS_MSGBOX0>;
+			resets = <&ccu RST_BUS_MSGBOX0>;
+			interrupts = <SOC_PERIPHERAL_IRQ(0) IRQ_TYPE_LEVEL_HIGH>;
+			#mbox-cells = <1>;
+			status = "okay";
+		};
+
+		dsp: dsp@1700000 {
+			compatible = "allwinner,sunxi-r528-hifi4-rproc";
+			reg = <0x01700000 0x100>;
+			reg-names = "cfg";
+
+			allwinner,sram = <&syscon>;
+
+			clocks = <&ccu CLK_DSP>,
+			         <&ccu CLK_BUS_DSP_CFG>;
+			clock-names = "dsp", "cfg";
+
+			resets = <&ccu RST_DSP>,
+			         <&ccu RST_BUS_DSP_CFG>,
+			         <&ccu RST_BUS_DSP_DBG>;
+			reset-names = "dsp", "cfg", "dbg";
+
+			/*
+			 * Mailbox channels:
+			 *   Channel 0 = RX from DSP (MSGBOX channels 0-3)
+			 *   Channel 4 = TX to DSP   (MSGBOX channels 4-7)
+			 */
+			mboxes = <&msgbox 0>,  /* RX: DSP -> ARM */
+			         <&msgbox 4>;  /* TX: ARM -> DSP */
+			mbox-names = "rx", "tx";
+
+			memory-region = <&dsp_reserved>,
+			                <&vdev0buffer>,
+			                <&vdev0vring0>,
+			                <&vdev0vring1>;
+
+			/*
+			 * Firmware file loaded from /lib/firmware/.
+			 * Can be overridden at runtime via:
+			 *   echo my_fw.elf > /sys/class/remoteproc/remoteproc0/firmware
+			 */
+			firmware-name = "dsp0.elf";
+
+			status = "okay";
+		};
+	};
+};
+
+&cpu0 {
+	cpu-supply = <&reg_vcc_core>;
+};
+
+&cpu1 {
+	cpu-supply = <&reg_vcc_core>;
+};
+
+&dcxo {
+	clock-frequency = <24000000>;
+};
+
+/* SDIO WiFi module (vendor: sdc1, WL_HOSTWAKE on PG6) */
+&mmc1 {
+	pinctrl-0 = <&mmc1_pins>;
+	pinctrl-names = "default";
+	vmmc-supply = <&reg_3v3>;
+	vqmmc-supply = <&reg_3v3>;
+	mmc-pwrseq = <&wifi_pwrseq>;
+	bus-width = <4>;
+	non-removable;
+	status = "okay";
+
+	wifi: wifi@1 {
+		reg = <1>;
+		interrupt-parent = <&pio>;
+		interrupts = <6 6 IRQ_TYPE_LEVEL_LOW>; /* PG6 - WL_HOSTWAKE */
+		interrupt-names = "host-wake";
+	};
+};
+
+&mmc2 {
+	pinctrl-0 = <&mmc2_pins>;
+	pinctrl-names = "default";
+	vmmc-supply = <&reg_3v3>;
+	vqmmc-supply = <&reg_1v8>;
+	cap-mmc-highspeed;
+	mmc-hs200-1_8v;
+	non-removable;
+	cap-mmc-hw-reset;
+	bus-width = <4>;
+	max-frequency = <150000000>;
+	status = "okay";
+};
+
+&ehci0 {
+	status = "okay";
+};
+
+&ohci0 {
+	status = "okay";
+};
+
+&ehci1 {
+	status = "okay";
+};
+
+&ohci1 {
+	status = "okay";
+};
+
+&pio {
+	vcc-pb-supply = <&reg_3v3>;
+	vcc-pc-supply = <&reg_1v8>;
+	vcc-pd-supply = <&reg_3v3>;
+	vcc-pe-supply = <&reg_3v3>;
+	vcc-pf-supply = <&reg_3v3>;
+	vcc-pg-supply = <&reg_3v3>;
+
+	uart0_pf_pins: uart0-pf-pins {
+		pins = "PF2", "PF4";
+	};
+
+	uart1_pe_pins: uart1-pe-pins {
+		pins = "PE10", "PE11";
+		function = "uart1";
+	};
+
+	uart2_pe_pins: uart2-pe-pins {
+		pins = "PE2", "PE3";
+		function = "uart2";
+	};
+
+	uart3_pd_pins: uart3-pd-pins {
+		pins = "PD10", "PD11";
+		function = "uart3";
+	};
+
+	uart4_pe_pins: uart4-pe-pins {
+		pins = "PE4", "PE5";
+		function = "uart4";
+	};
+
+	pwm7_pd22_pin: pwm7-pd22-pin {
+		pins = "PD22";
+		function = "pwm7";
+	};
+
+	i2c2_pins: i2c2-pins {
+		pins = "PB0", "PB1";
+		function = "i2c2";
+	};
+
+	/* 32.768 kHz clock output for the WiFi/BT module */
+	clk_pg12_pin: clk-pg12-pin {
+		pins = "PG12";
+		function = "clk";
+	};
+};
+
+&uart0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart0_pf_pins>;
+	status = "okay";
+};
+
+&uart1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart1_pe_pins>;
+	status = "okay";
+};
+
+&uart2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart2_pe_pins>;
+	status = "okay";
+};
+
+&uart3 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart3_pd_pins>;
+	status = "okay";
+};
+
+&uart4 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart4_pe_pins>;
+	status = "okay";
+};
+
+/* The USB-C socket has its CC pins pulled to GND, so is hardwired as a UFP. */
+&usb_otg {
+	dr_mode = "peripheral";
+	status = "okay";
+};
+
+&usbphy {
+	usb1_vbus-supply = <&reg_vcc5v>;
+	status = "okay";
+};
+
+
+&pwm {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pwm7_pd22_pin>;
+	status = "okay";
+};
+
+&de {
+	status = "okay";
+};
+
+&mixer0 {
+	status = "okay";
+};
+
+&tcon_lcd0 {
+	status = "okay";
+};
+
+&dphy {
+	status = "okay";
+};
+
+&dsi {
+	status = "okay";
+
+	panel@0 {
+		compatible = "sitronix,st77922";
+		reg = <0>;
+		reset-gpios = <&pio 1 8 GPIO_ACTIVE_LOW>;	/* PB8, reset active-low */
+		vdd-supply = <&reg_3v3>;
+		iovcc-supply = <&reg_3v3>;
+		backlight = <&backlight>;
+	};
+};
+
+&syscon {
+	compatible = "allwinner,sun20i-d1-system-control",
+		"syscon";
+};
+
+&i2c2 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c2_pins>;
+
+	touchscreen@55 {
+		compatible = "sitronix_ts";
+		reg = <0x55>;
+		interrupt-parent = <&pio>;
+		interrupts = <4 1 IRQ_TYPE_LEVEL_LOW>; /* INT (PE1) */
+		irq-gpio = <&pio 4 1 GPIO_ACTIVE_HIGH>;
+		reset-gpio = <&pio 4 0 GPIO_ACTIVE_HIGH>;
+		/*
+		 * PE0 is the active-high reset line.
+		 * Stock driver sequence: low 1ms, high 100ms.
+		 */
+	};
+};
+
+&wdt {
+	status = "okay";
+};
